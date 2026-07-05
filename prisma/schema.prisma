@@ -1,0 +1,113 @@
+// Prisma v6 schema — connection URL is in prisma.config.ts, not here.
+// Learn more: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// USER
+// Core identity record. passwordHash is null for OAuth-only accounts.
+// emailVerified is null until the user clicks the verification link.
+// ─────────────────────────────────────────────────────────────────────────────
+model User {
+  id            String    @id @default(cuid())
+  email         String    @unique
+  name          String?
+  passwordHash  String?   // bcrypt hash — never the plain password
+  emailVerified DateTime? // null = unverified
+  image         String?
+  role          Role      @default(USER)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  sessions            Session[]
+  verificationTokens  VerificationToken[]
+  passwordResetTokens PasswordResetToken[]
+  accounts            Account[]
+
+  @@map("users")
+}
+
+enum Role {
+  USER
+  ADMIN
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SESSION
+// Server-side refresh token store. Storing a hash (not raw token) means a
+// database leak doesn't hand attackers valid tokens.
+// ─────────────────────────────────────────────────────────────────────────────
+model Session {
+  id        String   @id @default(cuid())
+  userId    String
+  tokenHash String   @unique // sha256 of the actual refresh token
+  userAgent String?
+  ipAddress String?
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("sessions")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// VERIFICATION TOKEN
+// One-time-use token emailed on registration. Deleted on use so it can't be
+// replayed. Expires in 24 hours.
+// ─────────────────────────────────────────────────────────────────────────────
+model VerificationToken {
+  id        String   @id @default(cuid())
+  userId    String
+  token     String   @unique // random 32-byte hex string
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("verification_tokens")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PASSWORD RESET TOKEN
+// Same pattern as VerificationToken but expires in 15 minutes (tighter window
+// because a reset link is higher-stakes than a verification link).
+// ─────────────────────────────────────────────────────────────────────────────
+model PasswordResetToken {
+  id        String   @id @default(cuid())
+  userId    String
+  token     String   @unique
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("password_reset_tokens")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ACCOUNT
+// OAuth provider links (Phase 5). One User can have many Accounts —
+// e.g. same email linked to both Google and GitHub.
+// ─────────────────────────────────────────────────────────────────────────────
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  provider          String  // "google", "github", etc.
+  providerAccountId String  // the ID from the OAuth provider
+  accessToken       String?
+  refreshToken      String?
+  expiresAt         Int?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@map("accounts")
+}
